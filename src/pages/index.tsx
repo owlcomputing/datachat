@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardContent, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
-import { BarChart, LineChart, MessageSquareText, Database } from "lucide-react"
+import { BarChart, LineChart, MessageSquareText, Database, User, Trash2 } from "lucide-react"
 import { AreaChart, Area, CartesianGrid, XAxis } from "recharts"
 import {
   ChartConfig,
@@ -18,6 +18,8 @@ import AreaChartTest from "@/components/AreaChart"
 import AreaChartInteractive from "@/components/AreaChartInteractive"
 import PieChartLabel from "@/components/PieChartLabel"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import Link from "next/link"
+import Radial from "@/components/Radial"
 
 
 const chartData = [
@@ -133,6 +135,7 @@ function useStreamingResponse() {
 
 export default function Index() {
   const [selectedDb, setSelectedDb] = useState<string | null>(null)
+  const [connections, setConnections] = useState<Array<{ name: string; connection: string }>>([])
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Array<{ 
     content: string | React.ReactNode; 
@@ -144,31 +147,88 @@ export default function Index() {
   const [gamesToShow, setGamesToShow] = useState<number | 'all'>('all')
   const { streamingText, isLoading, error, sendMessage } = useStreamingResponse();
 
-  const databases = [
-    { name: "Sales Analytics", connection: "sales" },
-    { name: "User Metrics", connection: "analytics" },
-    { name: "Inventory DB", connection: "inventory" }
-  ]
+  // Load connections from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedConnections = JSON.parse(localStorage.getItem('connections') || '[]')
+      setConnections(savedConnections)
+      
+      // Auto-select first connection if none selected
+      if (savedConnections.length > 0 && !selectedDb) {
+        setSelectedDb(savedConnections[0].connection)
+      }
+    }
+  }, []) // Add empty dependency array to run once on mount
+
+  // Add selectedDb to dependency array to handle connection list changes
+  useEffect(() => {
+    if (connections.length > 0 && !selectedDb) {
+      setSelectedDb(connections[0].connection)
+    }
+  }, [connections, selectedDb])
+
+  // Update the useEffect for loading messages
+  useEffect(() => {
+    if (selectedDb) {
+      const savedHistory = localStorage.getItem(`chatHistory-${selectedDb}`)
+      setMessages(savedHistory ? JSON.parse(savedHistory) : [])
+    } else {
+      setMessages([]) // Clear messages if no connection selected
+    }
+  }, [selectedDb])
+
+  // Update the useEffect for saving messages
+  useEffect(() => {
+    if (typeof window !== 'undefined' && selectedDb && messages.length > 0) {
+      localStorage.setItem(`chatHistory-${selectedDb}`, JSON.stringify(messages))
+    }
+  }, [messages, selectedDb])
 
   const handleSend = async () => {
+    if (!selectedDb) return; // Add guard clause
     if (!message.trim()) return;
 
     // Add user message
-    setMessages(prev => [...prev, { content: message, isUser: true }]);
+    const newMessage = { content: message, isUser: true };
+    setMessages(prev => {
+      const newMessages = [...prev, newMessage]
+      localStorage.setItem(
+        `chatHistory-${selectedDb}`, 
+        JSON.stringify(newMessages)
+      )
+      return newMessages
+    });
 
     try {
-      const result = await sendMessage(message);
-      setApiResponse(apiResponse);
+      const response = await fetch('https://www.boxscorewatch.com/api/natural-query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add authorization header if needed
+        },
+        body: JSON.stringify({
+          query: message,
+          format: "json"
+        }),
+      });
 
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      console.log(data);
+      
       // Format summary text with bold styling
-      const formattedSummary = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || '';
+      const formattedSummary = data.summaryText?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || '';
       
       // Create chat response with both text and chart
       const botResponse = (
         <div className="space-y-4">
           <div className="flex items-start gap-4">
             <img 
-              src={apiResponse?.headshotUrl} 
+              src={data.headshotUrl} 
               alt="Player headshot" 
               className="h-16 w-16 rounded-full border-2 border-primary"
             />
@@ -184,6 +244,8 @@ export default function Index() {
         content: botResponse, 
         isUser: false 
       }]);
+
+      setApiResponse(data);
 
     } catch (err: any) {
       setMessages(prev => [...prev, { 
@@ -264,48 +326,43 @@ export default function Index() {
     return (
       <div className="space-y-4 w-full">
         <div className="flex flex-col lg:flex-row gap-4 w-full">
-          <div className="lg:flex-1">
-            {/* Summary Section */}
-            <div 
-              className="whitespace-pre-wrap p-2 rounded bg-background"
-              dangerouslySetInnerHTML={{ __html: apiResponse?.summaryText?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || '' }}
-            />
-            
-            {/* Stats Table */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <Table>
-                <TableHeader className="bg-muted">
-                  <TableRow>
+          <div className="lg:flex-1 flex flex-col gap-4">
+            <Table className="border border-border rounded-lg animate-slide-in">
+              <TableHeader className="bg-muted">
+                <TableRow>
+                  {columns.map((col) => (
+                    <TableHead key={col} className="text-foreground">
+                      {col.startsWith('avg_') 
+                        ? `Avg ${col.split('_')[1].toUpperCase()}`
+                        : col.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' ')}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transformedData.map((player, index) => (
+                  <TableRow key={index}>
                     {columns.map((col) => (
-                      <TableHead key={col} className="text-foreground">
-                        {col.startsWith('avg_') 
-                          ? `Avg ${col.split('_')[1].toUpperCase()}`
-                          : col.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' ')}
-                      </TableHead>
+                      <TableCell key={col}>
+                        {col === 'fg_pct' 
+                          ? `${Math.round(Number(player[col as keyof PlayerStats]) * 100)}%` 
+                          : col.startsWith('avg_') 
+                            ? Number(player[col as keyof PlayerStats]).toFixed(1)
+                            : player[col as keyof PlayerStats]}
+                      </TableCell>
                     ))}
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transformedData.map((player, index) => (
-                    <TableRow key={index}>
-                      {columns.map((col) => (
-                        <TableCell key={col}>
-                          {col === 'fg_pct' 
-                            ? `${Math.round(Number(player[col as keyof PlayerStats]) * 100)}%` 
-                            : col.startsWith('avg_') 
-                              ? Number(player[col as keyof PlayerStats]).toFixed(1)
-                              : player[col as keyof PlayerStats]}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                ))}
+              </TableBody>
+            </Table>
+            <Radial 
+              data={transformedData.map(p => p.fg_pct)} 
+              className="animate-slide-in delay-100"
+            />
           </div>
           
           <div className="lg:flex-1">
-            <Card className="h-full">
+            <Card className="h-full animate-slide-in delay-200">
               <CardContent className="pt-6">
                 <AreaChartTest 
                   data={chartData} 
@@ -324,18 +381,50 @@ export default function Index() {
       {/* Desktop Sidebar */}
       <aside className="hidden lg:block w-64 border-r border-border bg-muted/20 p-4">
         <nav className="space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight">Data Connections</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold tracking-tight">Data Connections</h2>
+          </div>
+          
           <div className="space-y-1">
-            {databases.map((db) => (
-              <Button
-                key={db.connection}
-                variant={selectedDb === db.connection ? 'secondary' : 'ghost'}
-                className="w-full justify-start"
-                onClick={() => setSelectedDb(db.connection)}
-              >
-                <span className="truncate">{db.name}</span>
-              </Button>
+            {connections.map((db) => (
+              <div key={db.connection} className="flex gap-1 items-center">
+                <Button
+                  variant={selectedDb === db.connection ? 'secondary' : 'ghost'}
+                  className="w-full justify-start flex-1"
+                  onClick={() => setSelectedDb(db.connection)}
+                >
+                  <span className="truncate">{db.name}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (confirm(`Clear chat history for ${db.name}?`)) {
+                      localStorage.removeItem(`chatHistory-${db.connection}`)
+                      if (selectedDb === db.connection) {
+                        setMessages([])
+                      }
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             ))}
+          </div>
+          
+          <div className="pt-4 border-t">
+            <Link href="/profile">
+              <Button
+                variant="ghost"
+                className="w-full justify-start"
+              >
+                <User className="h-4 w-4 mr-2" />
+                Profile & Settings
+              </Button>
+            </Link>
           </div>
         </nav>
       </aside>
@@ -352,18 +441,77 @@ export default function Index() {
         </SheetTrigger>
         <SheetContent side="left" className="bg-background border-border">
           <nav className="space-y-4 p-4">
-            <h2 className="text-lg font-semibold tracking-tight">Data Connections</h2>
-            <div className="space-y-1">
-              {databases.map((db) => (
-                <Button
-                  key={db.connection}
-                  variant={selectedDb === db.connection ? 'secondary' : 'ghost'}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedDb(db.connection)}
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold tracking-tight">Data Connections</h2>
+              <div className="flex gap-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    if (selectedDb && confirm(`Clear chat history for ${selectedDb}?`)) {
+                      setMessages([])
+                      localStorage.removeItem(`chatHistory-${selectedDb}`)
+                    }
+                  }}
+                  disabled={!selectedDb}
                 >
-                  {db.name}
+                  <Trash2 className="h-4 w-4" />
                 </Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    if (confirm('Clear ALL chat history?')) {
+                      setMessages([])
+                      localStorage.removeItem('chatHistory')
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </div>
+            </div>
+            
+            <div className="space-y-1">
+              {connections.map((db) => (
+                <div key={db.connection} className="flex gap-1 items-center">
+                  <Button
+                    variant={selectedDb === db.connection ? 'secondary' : 'ghost'}
+                    className="w-full justify-start flex-1"
+                    onClick={() => setSelectedDb(db.connection)}
+                  >
+                    <span className="truncate">{db.name}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 hover:text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (confirm(`Clear chat history for ${db.name}?`)) {
+                        localStorage.removeItem(`chatHistory-${db.connection}`)
+                        if (selectedDb === db.connection) {
+                          setMessages([])
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               ))}
+            </div>
+            
+            <div className="pt-4 border-t">
+              <Link href="/profile">
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start"
+                >
+                  <User className="h-4 w-4 mr-2" />
+                  Profile
+                </Button>
+              </Link>
             </div>
           </nav>
         </SheetContent>
@@ -373,7 +521,7 @@ export default function Index() {
       <main className="flex-1 flex flex-col">
         <header className="border-b border-border p-4">
           <h1 className="text-2xl font-bold">
-            {selectedDb ? `${databases.find(db => db.connection === selectedDb)?.name} Chat` : "Select a Database"}
+            {selectedDb ? connections.find(db => db.connection === selectedDb)?.name : "Select a Database"}
           </h1>
         </header>
 
@@ -382,25 +530,33 @@ export default function Index() {
             <CardContent ref={messagesEndRef} className="space-y-4 h-[calc(100vh-200px)] overflow-y-auto">
               {messages.map((msg, index) => (
                 <div 
-                  key={index} 
-                  className={`p-3 rounded-lg flex items-start gap-2 ${
-                    msg.isUser 
-                      ? 'bg-primary/5 ml-auto border border-primary/20' 
-                      : 'bg-muted/5 border-l-4 border-muted-foreground/50'
-                  }`}
-                  style={{ maxWidth: '100%' }}
+                  key={index}
+                  className={`animate-slide-in ${index % 2 ? 'delay-100' : ''}`}
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  {!msg.isUser && <Database className="h-4 w-4 mt-1 text-muted-foreground" />}
-                  <div className="flex-1">
-                    {msg.isUser ? (
-                      <div className="whitespace-pre-wrap p-2 rounded bg-background">
-                        {msg.content}
-                      </div>
-                    ) : (
-                      renderChatResponse(apiResponse)
-                    )}
+                  <div 
+                    className={`p-3 rounded-lg flex items-start gap-2 ${
+                      msg.isUser 
+                        ? 'bg-primary/5 ml-auto border border-primary/20' 
+                        : 'bg-muted/5 border-l-4 border-muted-foreground/50'
+                    }`}
+                    style={{ maxWidth: '100%' }}
+                  >
+                    {!msg.isUser && <Database className="h-4 w-4 mt-1 text-muted-foreground" />}
+                    <div className="flex-1">
+                      {msg.isUser ? (
+                        <div className="whitespace-pre-wrap p-2 rounded bg-background">
+                          {msg.content}
+                        </div>
+                      ) : (
+                        // Re-render from stored data
+                        typeof msg.content === 'string' 
+                          ? msg.content 
+                          : renderChatResponse(msg.content)
+                      )}
+                    </div>
+                    {msg.isUser && <MessageSquareText className="h-4 w-4 mt-1 text-primary" />}
                   </div>
-                  {msg.isUser && <MessageSquareText className="h-4 w-4 mt-1 text-primary" />}
                 </div>
               ))}
             </CardContent>
