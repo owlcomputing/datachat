@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
@@ -85,6 +85,52 @@ function transformPlayerData(apiResponse: any): PlayerStats[] {
   }));
 }
 
+function useStreamingResponse() {
+  const [streamingText, setStreamingText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const sendMessage = useCallback(async (message: string) => {
+    setIsLoading(true);
+    setError(null);
+    setStreamingText('');
+
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Network response was not ok');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          break;
+        }
+        
+        const chunk = decoder.decode(value, { stream: true });
+        setStreamingText(prev => prev + chunk);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Unknown error'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { streamingText, isLoading, error, sendMessage };
+}
+
 export default function Index() {
   const [selectedDb, setSelectedDb] = useState<string | null>(null)
   const [message, setMessage] = useState('')
@@ -96,6 +142,7 @@ export default function Index() {
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [apiError, setApiError] = useState<string>('');
   const [gamesToShow, setGamesToShow] = useState<number | 'all'>('all')
+  const { streamingText, isLoading, error, sendMessage } = useStreamingResponse();
 
   const databases = [
     { name: "Sales Analytics", connection: "sales" },
@@ -110,35 +157,18 @@ export default function Index() {
     setMessages(prev => [...prev, { content: message, isUser: true }]);
 
     try {
-      const response = await fetch('https://www.boxscorewatch.com/api/natural-query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Add authorization header if needed
-        },
-        body: JSON.stringify({
-          query: message,
-          format: "json"
-        }),
-      });
+      const result = await sendMessage(message);
+      setApiResponse(apiResponse);
 
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      console.log(data);
-      
       // Format summary text with bold styling
-      const formattedSummary = data.summaryText?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || '';
+      const formattedSummary = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || '';
       
       // Create chat response with both text and chart
       const botResponse = (
         <div className="space-y-4">
           <div className="flex items-start gap-4">
             <img 
-              src={data.headshotUrl} 
+              src={apiResponse?.headshotUrl} 
               alt="Player headshot" 
               className="h-16 w-16 rounded-full border-2 border-primary"
             />
@@ -154,8 +184,6 @@ export default function Index() {
         content: botResponse, 
         isUser: false 
       }]);
-
-      setApiResponse(data);
 
     } catch (err: any) {
       setMessages(prev => [...prev, { 
@@ -391,7 +419,7 @@ export default function Index() {
               disabled={!selectedDb}
               className="bg-primary/90 hover:bg-primary text-primary-foreground"
             >
-              Send
+              {isLoading ? 'Sending...' : 'Send'}
             </Button>
           </div>
         </div>
