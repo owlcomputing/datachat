@@ -18,6 +18,7 @@ export const PostgresNLQGenerator = class {
       {schema}
       
       User Prompt: {query}
+
     `);
   }
 
@@ -29,6 +30,7 @@ export const PostgresNLQGenerator = class {
         ? `
         Previous attempt failed with error: ${errorContext}
         Please generate a corrected SQL query that addresses this error.
+        always return fields that would be relevant for the axes of charts as well.
       `
         : "";
 
