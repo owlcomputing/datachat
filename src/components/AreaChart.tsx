@@ -2,7 +2,7 @@
 
 import { TrendingUp, Share } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Card,
   CardContent,
@@ -29,8 +29,10 @@ interface AreaChartProps {
   description?: string;
   xAxisKey: string;
   gamesToShow?: number | 'all';
+  areaKey?: string;
   footerText?: string;
   trendText?: string;
+  showLabels?: boolean;
   margin?: {
     top?: number;
     left?: number;
@@ -46,14 +48,38 @@ export function AreaChartComponent({
   description,
   xAxisKey,
   gamesToShow = 'all',
+  areaKey,
   footerText,
   trendText,
+  showLabels = false,
   margin = { left: 12, right: 12, top: 12 }
 }: AreaChartProps) {
-  const filteredData = gamesToShow === 'all' ? data : data.slice(-Number(gamesToShow))
+  const [processedData, setProcessedData] = useState<Array<Record<string, any>>>([]);
+  const [colorMap, setColorMap] = useState<Record<string, string>>({});
   const [selectedStats, setSelectedStats] = useState<Array<keyof typeof config>>(
     Object.keys(config).slice(0, 3) as Array<keyof typeof config>
-  )
+  );
+  
+  // Process data and create color map
+  useEffect(() => {
+    const rawData = gamesToShow === 'all' ? data : data.slice(-Number(gamesToShow));
+    setProcessedData(rawData);
+    
+    // Create a map of key to color from the config
+    const newColorMap: Record<string, string> = {};
+    
+    Object.entries(config).forEach(([key, value]) => {
+      if (value.color) {
+        newColorMap[key] = value.color;
+      } else {
+        // Assign default chart colors
+        const colorIndex = Object.keys(newColorMap).length % 5 + 1;
+        newColorMap[key] = `hsl(var(--chart-${colorIndex}))`;
+      }
+    });
+    
+    setColorMap(newColorMap);
+  }, [data, config, gamesToShow]);
 
   const handleExport = useCallback(async () => {
     const chartElement = document.querySelector('.recharts-wrapper') as HTMLElement;
@@ -74,7 +100,7 @@ export function AreaChartComponent({
         console.error('Error exporting chart:', error);
       }
     }
-  }, [title, data, config]);
+  }, [title, processedData, config]);
 
   return (
     <Card>
@@ -118,7 +144,7 @@ export function AreaChartComponent({
         <ChartContainer config={config}>
           <AreaChart
             accessibilityLayer
-            data={filteredData}
+            data={processedData}
             margin={margin}
           >
             <CartesianGrid vertical={false} />
@@ -134,17 +160,29 @@ export function AreaChartComponent({
               content={<ChartTooltipContent indicator="line" />}
             />
             
-            {Object.entries(config).map(([key, config]) => (
+            {areaKey ? (
               <Area
-                key={key}
-                dataKey={key}
+                key={areaKey}
+                dataKey={areaKey}
                 type="natural"
-                fill={config.color}
+                fill={colorMap[areaKey] || `hsl(var(--chart-1))`}
                 fillOpacity={0.1}
-                stroke={config.color}
+                stroke={colorMap[areaKey] || `hsl(var(--chart-1))`}
                 strokeWidth={2}
               />
-            ))}
+            ) : (
+              Object.entries(config).map(([key, configItem], index) => (
+                <Area
+                  key={key}
+                  dataKey={key}
+                  type="natural"
+                  fill={colorMap[key] || `hsl(var(--chart-${(index % 5) + 1}))`}
+                  fillOpacity={0.1}
+                  stroke={colorMap[key] || `hsl(var(--chart-${(index % 5) + 1}))`}
+                  strokeWidth={2}
+                />
+              ))
+            )}
           </AreaChart>
         </ChartContainer>
       </CardContent>

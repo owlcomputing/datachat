@@ -1,7 +1,8 @@
 "use client"
 
 import { TrendingUp, Share } from "lucide-react"
-import { Pie, PieChart } from "recharts"
+import { Pie, PieChart, Cell } from "recharts"
+import { useEffect, useState } from "react"
 
 import {
   Card,
@@ -46,6 +47,40 @@ export function PieChartComponent({
   hideLabel = false,
   className
 }: PieChartProps) {
+  const [processedData, setProcessedData] = useState(data);
+  
+  // Process data to ensure colors are properly applied
+  useEffect(() => {
+    // Create a map of name to color from the config
+    const colorMap: Record<string, string> = {};
+    
+    Object.entries(config).forEach(([key, value]) => {
+      if (value.color) {
+        colorMap[key] = value.color;
+      }
+    });
+    
+    // Apply colors to the data
+    const newData = data.map(item => {
+      const name = item[nameKey];
+      
+      // Special case for browser data (from the example)
+      if (nameKey === 'browser' && config[name]?.color) {
+        return {
+          ...item,
+          fill: config[name].color
+        };
+      }
+      
+      return {
+        ...item,
+        fill: colorMap[name] || `hsl(var(--chart-${Object.keys(colorMap).indexOf(name) % 5 + 1}))`
+      };
+    });
+    
+    setProcessedData(newData);
+  }, [data, config, nameKey]);
+
   const handleExport = useCallback(async () => {
     const chartElement = document.querySelector('.recharts-wrapper') as HTMLElement;
     if (chartElement) {
@@ -65,7 +100,7 @@ export function PieChartComponent({
         console.error('Error exporting chart:', error);
       }
     }
-  }, [title, data, config]);
+  }, [title, processedData, config]);
 
   return (
     <Card className={`flex flex-col ${className || ''}`}>
@@ -80,7 +115,19 @@ export function PieChartComponent({
         >
           <PieChart>
             <ChartTooltip content={<ChartTooltipContent hideLabel={hideLabel} />} />
-            <Pie data={data} dataKey={dataKey} label nameKey={nameKey} />
+            <Pie 
+              data={processedData} 
+              dataKey={dataKey} 
+              nameKey={nameKey}
+              label
+            >
+              {processedData.map((entry, index) => (
+                <Cell 
+                  key={`cell-${index}`} 
+                  fill={entry.fill} 
+                />
+              ))}
+            </Pie>
           </PieChart>
         </ChartContainer>
       </CardContent>

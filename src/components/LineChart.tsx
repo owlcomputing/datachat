@@ -2,6 +2,7 @@
 
 import { TrendingUp, Share } from "lucide-react"
 import { CartesianGrid, LabelList, Line, LineChart, XAxis } from "recharts"
+import { useState, useEffect, useCallback } from 'react'
 import {
   Card,
   CardContent,
@@ -18,7 +19,6 @@ import {
 } from "@/components/ui/chart"
 import { Button } from "@/components/ui/button"
 import html2canvas from 'html2canvas'
-import { useCallback } from 'react'
 
 interface LineChartProps {
   data: Array<Record<string, any>>;
@@ -50,6 +50,31 @@ export function LineChartComponent({
   showLabels = false,
   margin = { top: 20, left: 12, right: 12 }
 }: LineChartProps) {
+  const [processedData, setProcessedData] = useState(data);
+  const [colorMap, setColorMap] = useState<Record<string, string>>({});
+  
+  // Process data and create color map
+  useEffect(() => {
+    // Create a map of key to color from the config
+    const newColorMap: Record<string, string> = {};
+    
+    Object.entries(config).forEach(([key, value]) => {
+      if (value.color) {
+        newColorMap[key] = value.color;
+      }
+    });
+    
+    // For any keys without colors, assign default chart colors
+    lineKeys.forEach((key, index) => {
+      if (!newColorMap[key]) {
+        newColorMap[key] = `hsl(var(--chart-${(index % 5) + 1}))`;
+      }
+    });
+    
+    setColorMap(newColorMap);
+    setProcessedData([...data]);
+  }, [data, config, lineKeys]);
+
   const handleExport = useCallback(async () => {
     const chartElement = document.querySelector('.recharts-wrapper') as HTMLElement;
     if (chartElement) {
@@ -69,7 +94,7 @@ export function LineChartComponent({
         console.error('Error exporting chart:', error);
       }
     }
-  }, [title, data, config]);
+  }, [title, processedData, config]);
 
   return (
     <Card>
@@ -81,7 +106,7 @@ export function LineChartComponent({
         <ChartContainer config={config}>
           <LineChart
             accessibilityLayer
-            data={data}
+            data={processedData}
             margin={margin}
           >
             <CartesianGrid vertical={false} />
@@ -101,10 +126,10 @@ export function LineChartComponent({
                 key={key}
                 dataKey={key}
                 type="natural"
-                stroke={`var(--color-${key})`}
+                stroke={colorMap[key] || `hsl(var(--chart-${(index % 5) + 1}))`}
                 strokeWidth={2}
                 dot={{
-                  fill: `var(--color-${key})`,
+                  fill: colorMap[key] || `hsl(var(--chart-${(index % 5) + 1}))`,
                 }}
                 activeDot={{
                   r: 6,
