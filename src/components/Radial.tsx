@@ -1,6 +1,6 @@
 "use client"
 
-import { TrendingUp } from "lucide-react"
+import { TrendingUp, Share } from "lucide-react"
 import {
   Label,
   PolarGrid,
@@ -18,52 +18,89 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { ChartConfig, ChartContainer } from "@/components/ui/chart"
+import { Button } from "@/components/ui/button"
+import html2canvas from 'html2canvas'
+import { useCallback } from 'react'
 
-interface RadialProps {
-  data: number[];  // Array of fg_pct values
-  className?: string;  // Add className prop
+interface RadialChartProps {
+  data: number[];
+  config: ChartConfig;
+  title: string;
+  description?: string;
+  footerText?: string;
+  trendText?: string;
+  className?: string;
+  labelText?: string;
+  startAngle?: number;
+  endAngle?: number;
+  innerRadius?: number;
+  outerRadius?: number;
 }
 
-const chartConfig = {
-  visitors: {
-    label: "Visitors",
-  },
-  safari: {
-    label: "Safari",
-    color: "hsl(var(--chart-2))",
-  },
-} satisfies ChartConfig
-
-export function Radial({ data, className }: RadialProps) {
-  const averageFgPct = data.length > 0 
+export function RadialChartComponent({
+  data,
+  config,
+  title,
+  description,
+  footerText,
+  trendText,
+  className,
+  labelText = "Average",
+  startAngle = 0,
+  endAngle = 250,
+  innerRadius = 80,
+  outerRadius = 110
+}: RadialChartProps) {
+  const averageValue = data.length > 0 
     ? (data.reduce((a, b) => a + b, 0) / data.length) * 100  // Convert to percentage
     : 0;
 
   const chartData = [
     { 
-      value: averageFgPct,
+      value: averageValue,
       fill: "hsl(var(--chart-1))",
-      label: "FG%"
+      label: labelText
     },
   ];
+
+  const handleExport = useCallback(async () => {
+    const chartElement = document.querySelector('.recharts-wrapper') as HTMLElement;
+    if (chartElement) {
+      try {
+        const canvas = await html2canvas(chartElement, {
+          scale: 2,
+          logging: false,
+          backgroundColor: '#ffffff',
+          useCORS: true
+        });
+        
+        const dataUrl = canvas.toDataURL('image/png', 1.0);
+        const tweetText = encodeURIComponent(`Check out this chart: ${title}\n\n`);
+        const tweetUrl = `https://x.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(dataUrl)}`;
+        window.open(tweetUrl, '_blank');
+      } catch (error) {
+        console.error('Error exporting chart:', error);
+      }
+    }
+  }, [title, data, config]);
 
   return (
     <Card className={`flex flex-col ${className}`}>
       <CardHeader className="items-center pb-0">
-        <CardTitle>Field Goal Percentage</CardTitle>
-        <CardDescription>Current Game Average</CardDescription>
+        <CardTitle>{title}</CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
       </CardHeader>
       <CardContent className="flex-1 pb-0">
         <ChartContainer
-          config={chartConfig}
+          config={config}
           className="mx-auto aspect-square max-h-[250px]"
         >
           <RadialBarChart
             data={chartData}
-            startAngle={0}
-            endAngle={250}
-            innerRadius={80}
-            outerRadius={110}
+            startAngle={startAngle}
+            endAngle={endAngle}
+            innerRadius={innerRadius}
+            outerRadius={outerRadius}
           >
             <PolarGrid
               gridType="circle"
@@ -89,14 +126,14 @@ export function Radial({ data, className }: RadialProps) {
                           y={viewBox.cy}
                           className="fill-foreground text-4xl font-bold"
                         >
-                          {averageFgPct.toFixed(1)}%
+                          {averageValue.toFixed(1)}%
                         </tspan>
                         <tspan
                           x={viewBox.cx}
                           y={(viewBox.cy || 0) + 24}
                           className="fill-muted-foreground"
                         >
-                          Average FG%
+                          {labelText}
                         </tspan>
                       </text>
                     )
@@ -107,16 +144,31 @@ export function Radial({ data, className }: RadialProps) {
           </RadialBarChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col gap-2 text-sm">
-        <div className="flex items-center gap-2 font-medium leading-none">
-          Trending up by 5.2% this month <TrendingUp className="h-4 w-4" />
+      <CardFooter className="flex justify-between items-center">
+        <div className="flex flex-col gap-2">
+          {trendText && (
+            <div className="flex items-center gap-2 font-medium leading-none">
+              {trendText} <TrendingUp className="h-4 w-4" />
+            </div>
+          )}
+          {footerText && (
+            <div className="leading-none text-muted-foreground">
+              {footerText}
+            </div>
+          )}
         </div>
-        <div className="leading-none text-muted-foreground">
-          Showing total visitors for the last 6 months
-        </div>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={handleExport}
+          className="flex items-center gap-2"
+        >
+          <Share className="h-4 w-4" />
+          Share on Twitter
+        </Button>
       </CardFooter>
     </Card>
   )
 }
 
-export default Radial;
+export default RadialChartComponent;
