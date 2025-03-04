@@ -7,7 +7,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import sodium from "https://deno.land/x/sodium/basic.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import * as crypto from "https://deno.land/std@0.168.0/crypto/mod.ts";
 
 const SUPABASE_URL = 'https://aadvgunvxivivkkyhsrp.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhZHZndW52eGl2aXZra3loc3JwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA2NjYzMTcsImV4cCI6MjA1NjI0MjMxN30.f_iqnwPGUUbt2hza6M_tQcq-FHZcJrGJxQ5UrwHD3HU'
@@ -22,6 +23,43 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+// Function to encrypt the password
+async function encryptPassword(password: string): Promise<string> {
+  try {
+    // Generate a random IV
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+    
+    // Convert the encryption key to a CryptoKey
+    const keyData = new TextEncoder().encode(ENCRYPTION_KEY);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "AES-CBC", length: 256 },
+      false,
+      ["encrypt"]
+    );
+    
+    // Encrypt the password
+    const encodedPassword = new TextEncoder().encode(password);
+    const encryptedData = await crypto.subtle.encrypt(
+      { name: "AES-CBC", iv },
+      key,
+      encodedPassword
+    );
+    
+    // Combine IV and encrypted data
+    const result = new Uint8Array(iv.length + new Uint8Array(encryptedData).length);
+    result.set(iv, 0);
+    result.set(new Uint8Array(encryptedData), iv.length);
+    
+    // Return as base64 string
+    return encodeBase64(result);
+  } catch (error) {
+    console.error("Encryption error:", error);
+    throw new Error("Failed to encrypt password");
+  }
+}
 
 serve(async (req) => {
   // Handle preflight
@@ -49,13 +87,8 @@ serve(async (req) => {
       });
     }
 
-    // Hash the password using sodium
-    await sodium.ready;
-    const hashedPassword = sodium.crypto_pwhash_str(
-        password,
-        sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-        sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE
-    );
+    // Encrypt the password
+    const encryptedPassword = await encryptPassword(password);
 
     const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: {
@@ -72,7 +105,7 @@ serve(async (req) => {
           user_id: userId,
           dbname: dbname,
           username: username,
-          password: hashedPassword, // Store hashed password
+          password: encryptedPassword, // Store encrypted password
           host: host,
           port: port,
           display_name: displayName,

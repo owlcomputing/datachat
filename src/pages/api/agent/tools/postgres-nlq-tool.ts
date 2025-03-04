@@ -9,10 +9,16 @@ export class PostgresNLQTool extends Tool {
 
   private nlqGenerator: InstanceType<typeof PostgresNLQGenerator>;
   private queryExecutor: InstanceType<typeof PostgresQuery>;
+  private userId: string | null = null;
+  private chatId: string | null = null;
+  private connectionId: string | null = null;
 
-  constructor() {
+  constructor(userId: string | null = null, chatId: string | null = null, connectionId: string | null = null) {
     super();
-    this.nlqGenerator = new PostgresNLQGenerator();
+    this.userId = userId;
+    this.chatId = chatId;
+    this.connectionId = connectionId;
+    this.nlqGenerator = new PostgresNLQGenerator(connectionId);
     this.queryExecutor = new PostgresQuery();
   }
 
@@ -23,6 +29,27 @@ export class PostgresNLQTool extends Tool {
     const MAX_RETRIES = 2;
 
     try {
+      // Initialize the database connection if needed
+      if (this.userId && (this.chatId || this.connectionId)) {
+        // If connectionId is provided, use it directly
+        if (this.connectionId) {
+          await this.queryExecutor.initializeConnection(this.userId, this.connectionId);
+          this.nlqGenerator.setConnectionId(this.connectionId);
+        } 
+        // Otherwise, try to get the connection from the chat
+        else if (this.chatId) {
+          const connectionId = await this.queryExecutor.getConnectionForChat(this.userId, this.chatId);
+          if (connectionId) {
+            await this.queryExecutor.initializeConnection(this.userId, connectionId);
+            this.nlqGenerator.setConnectionId(connectionId);
+            this.connectionId = connectionId;
+          } else {
+            console.error("No connection found for this chat");
+            return "No database connection found for this chat. Please set up a connection first.";
+          }
+        }
+      }
+
       // Generate SQL query from natural language
       const sqlQuery = await this.nlqGenerator.generateQuery(
         input,
@@ -62,6 +89,18 @@ export class PostgresNLQTool extends Tool {
 
   async _call(input: string): Promise<string> {
     return this._executeWithRetry(input);
+  }
+
+  // Set user and chat IDs
+  setContext(userId: string, chatId: string) {
+    this.userId = userId;
+    this.chatId = chatId;
+  }
+
+  // Set connection ID directly
+  setConnectionId(connectionId: string) {
+    this.connectionId = connectionId;
+    this.nlqGenerator.setConnectionId(connectionId);
   }
 }
 

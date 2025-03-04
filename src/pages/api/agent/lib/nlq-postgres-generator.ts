@@ -1,16 +1,19 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { PromptTemplate } from "@langchain/core/prompts";
-import schema from "./schema";
+import defaultSchema, { getSchemaForConnection } from "./schema";
 
 export const PostgresNLQGenerator = class {
   private model: ChatGoogleGenerativeAI;
   private promptTemplate: PromptTemplate;
+  private connectionId: string | null = null;
 
-  constructor() {
+  constructor(connectionId: string | null = null) {
     this.model = new ChatGoogleGenerativeAI({
       modelName: process.env.GEMINI_API_MODEL,
       apiKey: process.env.GEMINI_API_KEY,
     });
+
+    this.connectionId = connectionId;
 
     this.promptTemplate = PromptTemplate.fromTemplate(`
       You are a SQL Expert. Use the following data to generate only valid postgres SQL statements in response to any questions I ask. Your responses should be purely in SQL, directly related to the user's prompt. Here is the user's prompt:
@@ -89,8 +92,18 @@ export const PostgresNLQGenerator = class {
         IMPORTANT: Format your response as a valid SQL query only. Do not include any explanations or markdown formatting.
       `);
 
+      // Get the schema for the current connection
+      let schemaData;
+      if (this.connectionId) {
+        schemaData = await getSchemaForConnection(this.connectionId);
+        console.log(`Using schema for connection ID: ${this.connectionId}`);
+      } else {
+        schemaData = defaultSchema;
+        console.log("Using default schema");
+      }
+
       const formattedPrompt = await this.promptTemplate.format({
-        schema: schema,
+        schema: JSON.stringify(schemaData, null, 2),
         query: naturalLanguageQuery,
       });
 
@@ -138,6 +151,11 @@ export const PostgresNLQGenerator = class {
     
     // If we can't find any SQL keywords, just return the trimmed text
     return responseText.trim();
+  }
+
+  // Set the connection ID
+  setConnectionId(connectionId: string | null) {
+    this.connectionId = connectionId;
   }
 };
 
