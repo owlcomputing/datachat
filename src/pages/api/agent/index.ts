@@ -6,6 +6,7 @@ import { AgentExecutor } from "langchain/agents";
 import { Tool } from "@langchain/core/tools";
 import { NextApiRequest, NextApiResponse } from "next";
 import { PostgresNLQTool } from "./tools/postgres-nlq-tool";
+import { MySQLNLQTool } from "./tools/mysql-nlq-tool";
 import { createClient } from '@supabase/supabase-js';
 
 let agentExecutor: any;
@@ -38,6 +39,27 @@ async function checkSupabaseConnection() {
   }
 }
 
+// Function to get the database dialect
+async function getDatabaseDialect(connectionId: string): Promise<string> {
+  try {
+    const { data, error } = await supabaseClient
+      .from('database_connections')
+      .select('dialect')
+      .eq('id', connectionId)
+      .single();
+
+    if (error || !data) {
+      console.error("Error fetching database dialect:", error?.message || 'Connection not found');
+      return 'postgres'; // Default to postgres if not found
+    }
+
+    return data.dialect || 'postgres';
+  } catch (error) {
+    console.error("Error getting database dialect:", error);
+    return 'postgres'; // Default to postgres on error
+  }
+}
+
 export async function initializeAgent(userId?: string, chatId?: string, connectionId?: string) {
   // Create a new agent executor for each request to ensure we use the correct connection
   const gemini = new ChatGoogleGenerativeAI({
@@ -47,14 +69,35 @@ export async function initializeAgent(userId?: string, chatId?: string, connecti
     streaming: true,
   });
 
-  // Create the PostgresNLQTool with user and chat context
-  const postgresNLQTool = new PostgresNLQTool(
-    userId || null,
-    chatId || null,
-    connectionId || null
-  );
+  let databaseTool: Tool;
 
-  const tools: Tool[] = [postgresNLQTool];
+  // If we have a connectionId, determine which tool to use based on the dialect
+  if (connectionId) {
+    try {
+      const dialect = await getDatabaseDialect(connectionId);
+      console.log(`Database dialect for connection ${connectionId}: ${dialect}`);
+      
+      if (dialect === 'mysql') {
+        console.log("Using MySQL NLQ tool");
+        databaseTool = new MySQLNLQTool(userId || null, chatId || null, connectionId);
+      } else {
+        // Default to Postgres for any other dialect
+        console.log("Using Postgres NLQ tool");
+        databaseTool = new PostgresNLQTool(userId || null, chatId || null, connectionId);
+      }
+    } catch (error) {
+      console.error("Error determining database dialect:", error);
+      // Default to Postgres on error
+      console.log("Defaulting to Postgres NLQ tool due to error");
+      databaseTool = new PostgresNLQTool(userId || null, chatId || null, connectionId);
+    }
+  } else {
+    // If no connectionId, use the PostgresNLQTool as default
+    console.log("No connectionId provided, using Postgres NLQ tool as default");
+    databaseTool = new PostgresNLQTool(userId || null, chatId || null, null);
+  }
+
+  const tools: Tool[] = [databaseTool];
 
   const prompt = ChatPromptTemplate.fromMessages([
     {
@@ -101,14 +144,27 @@ export async function initializeAgent(userId?: string, chatId?: string, connecti
   return newAgentExecutor;
 }
 
-export async function handleQuestion(userInput: string, userId?: string, chatId?: string, connectionId?: string) {
+export async function handleQuestion(userInput: string, userId?: string, chatId?: string, connectionId?: string, context: any[] = []) {
   // Initialize a new agent executor for this request
   const agentExecutor = await initializeAgent(userId, chatId, connectionId);
 
   console.log("Processing question:", userInput);
+  console.log("With context:", context);
+  
+  // Format the context as a conversation history if available
+  let formattedInput = userInput;
+  if (context && context.length > 0) {
+    const conversationHistory = context.map(msg => {
+      const role = msg.isUser ? 'User' : 'Assistant';
+      return `${role}: ${msg.content}`;
+    }).join('\n');
+    
+    formattedInput = `Previous conversation:\n${conversationHistory}\n\nCurrent question: ${userInput}`;
+    console.log("Formatted input with context:", formattedInput);
+  }
   
   const result = await agentExecutor.invoke({
-    input: userInput,
+    input: formattedInput,
   });
 
   console.log("Raw agent response:", result);
@@ -146,8 +202,6 @@ export async function handleQuestion(userInput: string, userId?: string, chatId?
     visualization: visualization,
     tableData: tableData
   };
-  
-  console.log("Final response:", JSON.stringify(finalResponse, null, 2));
   
   return finalResponse;
 }
@@ -217,12 +271,18 @@ async function suggestGraphType(data: string, originalQuery: string, agentExecut
   {
     "type": "pie",
     "componentConfig": {
-      "data": [array of data points with name and value],
-      "config": {key-value pairs with label and color},
+      "data": [
+        { "name": "Category1", "value": 100 },
+        { "name": "Category2", "value": 200 }
+      ],
+      "config": {
+        "Category1": { "label": "Category1", "color": "hsl(var(--chart-1))" },
+        "Category2": { "label": "Category2", "color": "hsl(var(--chart-2))" }
+      },
       "title": "Descriptive chart title",
       "description": "Optional description",
-      "dataKey": "The key for the values",
-      "nameKey": "The key for the segment names",
+      "dataKey": "value",
+      "nameKey": "name",
       "footerText": "Optional footer text",
       "trendText": "Optional trend description"
     }
@@ -253,9 +313,17 @@ async function suggestGraphType(data: string, originalQuery: string, agentExecut
   - For bar charts, ensure the xAxisKey (category) exists in each data point
   
   IMPORTANT FOR COLORS:
-  - For pie charts, make sure to include a color for each segment in the config using the segment name as the key
+  - For pie charts, the config must use this exact format:
+    "config": {
+      "CategoryName1": { "label": "CategoryName1", "color": "hsl(var(--chart-1))" },
+      "CategoryName2": { "label": "CategoryName2", "color": "hsl(var(--chart-2))" }
+    }
+  - Do NOT use this format for pie charts (it won't work):
+    "config": {
+      "CategoryName1": "hsl(var(--chart-1))",
+      "CategoryName2": "hsl(var(--chart-2))"
+    }
   - Use explicit HSL color values like "hsl(var(--chart-1))" through "hsl(var(--chart-5))" for consistent coloring
-  - Do not use "var(--color-X)" format as it won't work properly
   `;
 
   try {
@@ -281,15 +349,25 @@ async function suggestGraphType(data: string, originalQuery: string, agentExecut
       // Check if the response is "null" or indicates no visualization
       if (cleanedResponse.toLowerCase() === 'null' || 
           cleanedResponse.toLowerCase().includes('not suitable') ||
-          cleanedResponse.toLowerCase().includes('cannot be visualized')) {
+          cleanedResponse.toLowerCase().includes('cannot be visualized') ||
+          cleanedResponse.toLowerCase().includes("i'm sorry") ||
+          cleanedResponse.toLowerCase().includes("i don't know")) {
         console.log("Data not suitable for visualization");
         return null;
       }
       
-      const result = JSON.parse(cleanedResponse);
+      // Try to parse the JSON response
+      let result;
+      try {
+        result = JSON.parse(cleanedResponse);
+      } catch (parseError) {
+        console.error("Failed to parse JSON response:", parseError);
+        console.log("Response content:", cleanedResponse);
+        return null;
+      }
       
       // Validate the result has the required structure
-      if (!result.type || !result.componentConfig) {
+      if (!result || !result.type || !result.componentConfig) {
         console.error("Invalid visualization format:", result);
         return null;
       }
@@ -314,17 +392,22 @@ async function suggestGraphType(data: string, originalQuery: string, agentExecut
         });
       }
       
-      if (!config.config) {
-        // Create a default config if none is provided
-        config.config = {};
+      // Special handling for pie chart colors
+      if (result.type.toLowerCase() === 'pie') {
+        const nameKey = config.nameKey || 'name';
         
-        // For pie charts, create config entries for each slice
-        if (result.type.toLowerCase() === 'pie') {
-          const nameKey = config.nameKey || 'name';
-          config.data.forEach((item: Record<string, any>) => {
+        // If config is in the wrong format (direct key-color mapping), convert it
+        if (config.config && typeof config.config === 'object' && 
+            Object.values(config.config).some(v => typeof v === 'string')) {
+          console.log("Converting pie chart color format");
+          const oldConfig = {...config.config};
+          config.config = {};
+          
+          // Create proper config entries for each slice
+          config.data.forEach((item: Record<string, any>, index: number) => {
             const key = item[nameKey];
             if (key) {
-              const colorIndex = (Object.keys(config.config).length % 5) + 1;
+              const colorIndex = (index % 5) + 1;
               config.config[key] = {
                 label: key,
                 color: `hsl(var(--chart-${colorIndex}))`
@@ -332,18 +415,36 @@ async function suggestGraphType(data: string, originalQuery: string, agentExecut
             }
           });
         }
-        // For other charts, create config entries for each data key
-        else {
-          const sampleItem = config.data[0];
-          Object.keys(sampleItem).forEach((key, index) => {
-            if (key !== config.xAxisKey && key !== 'name' && typeof sampleItem[key] === 'number') {
+        
+        // If no config exists, create one
+        if (!config.config) {
+          config.config = {};
+          
+          // Create config entries for each slice
+          config.data.forEach((item: Record<string, any>, index: number) => {
+            const key = item[nameKey];
+            if (key) {
+              const colorIndex = (index % 5) + 1;
               config.config[key] = {
                 label: key,
-                color: `hsl(var(--chart-${index % 5 + 1}))`
+                color: `hsl(var(--chart-${colorIndex}))`
               };
             }
           });
         }
+      }
+      // For other charts, create config entries for each data key if no config exists
+      else if (!config.config) {
+        config.config = {};
+        const sampleItem = config.data[0];
+        Object.keys(sampleItem).forEach((key, index) => {
+          if (key !== config.xAxisKey && key !== 'name' && typeof sampleItem[key] === 'number') {
+            config.config[key] = {
+              label: key,
+              color: `hsl(var(--chart-${index % 5 + 1}))`
+            };
+          }
+        });
       }
       
       console.log("Visualization suggestion:", JSON.stringify(result, null, 2));
@@ -438,15 +539,25 @@ async function suggestTableData(data: string, originalQuery: string, agentExecut
       // Check if the response is "null" or indicates no table data
       if (cleanedResponse.toLowerCase() === 'null' || 
           cleanedResponse.toLowerCase().includes('not suitable') ||
-          cleanedResponse.toLowerCase().includes('cannot be displayed')) {
+          cleanedResponse.toLowerCase().includes('cannot be displayed') ||
+          cleanedResponse.toLowerCase().includes("i'm sorry") ||
+          cleanedResponse.toLowerCase().includes("i don't know")) {
         console.log("Data not suitable for table display");
         return null;
       }
       
-      const result = JSON.parse(cleanedResponse);
+      // Try to parse the JSON response
+      let result;
+      try {
+        result = JSON.parse(cleanedResponse);
+      } catch (parseError) {
+        console.error("Failed to parse JSON response:", parseError);
+        console.log("Response content:", cleanedResponse);
+        return null;
+      }
       
       // Validate the result has the required structure
-      if (!result.type || !result.componentConfig) {
+      if (!result || !result.type || !result.componentConfig) {
         console.error("Invalid table format:", result);
         return null;
       }
@@ -522,7 +633,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: 'Failed to connect to Supabase' });
       }
 
-      const { question, userId, chatId } = req.body;
+      const { question, userId, chatId, context } = req.body;
       let connectionId = req.body.connectionId;
 
       console.log("API request received:", {
@@ -530,6 +641,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         userId,
         chatId,
         connectionId,
+        contextLength: context ? context.length : 0,
         headers: req.headers,
       });
 
@@ -632,8 +744,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Process the question with the agent
-      console.log(`Processing question with agent: question="${question}", userId=${userId}, chatId=${chatId}, connectionId=${connectionId}`);
-      const response = await handleQuestion(question, userId, chatId, connectionId);
+      console.log(`Processing question with agent: question="${question}", userId=${userId}, chatId=${chatId}, connectionId=${connectionId}, contextLength=${context ? context.length : 0}`);
+      const response = await handleQuestion(question, userId, chatId, connectionId, context || []);
       
       return res.status(200).json(response);
     } catch (error) {

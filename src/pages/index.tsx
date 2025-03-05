@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
-import { MessageSquareText, Database, User, Trash2, PlusCircle } from "lucide-react"
+import { MessageSquareText, Database, User, Trash2, PlusCircle, Menu } from "lucide-react"
 import Link from "next/link"
 import { useUser, useSupabaseClient } from '@supabase/auth-helpers-react'
 import { useRouter } from 'next/router'
@@ -18,6 +18,8 @@ import rehypeRaw from 'rehype-raw'
 import { motion, AnimatePresence } from 'framer-motion'
 import TableComponent, { Column } from '@/components/Table'
 import { toast } from 'react-hot-toast'
+import { NewChatDialog } from "@/components/NewChatDialog"
+import { Badge } from "@/components/ui/badge"
 
 interface VisualizationData {
   type: string;
@@ -183,7 +185,7 @@ function useStreamingResponse(connections: Array<{ name: string; connection: str
     const supabaseClient = useSupabaseClient();
     const user = useUser();
 
-    const sendMessage = useCallback(async (message: string, selectedDb: string | null, chatId: string | null = null) => {
+    const sendMessage = useCallback(async (message: string, selectedDb: string | null, chatId: string | null = null, recentMessages: Message[] = []) => {
         setIsLoading(true);
         setError(null);
         setStreamingText('');
@@ -205,7 +207,8 @@ function useStreamingResponse(connections: Array<{ name: string; connection: str
             question: message,
             userId: user.id,
             connectionId: selectedDb,
-            chatId: chatId
+            chatId: chatId,
+            context: recentMessages.slice(-5)
         });
 
         try {
@@ -218,7 +221,8 @@ function useStreamingResponse(connections: Array<{ name: string; connection: str
                     question: message,
                     userId: user.id,
                     connectionId: selectedDb,
-                    chatId: chatId
+                    chatId: chatId,
+                    context: recentMessages.slice(-5)
                 }),
             });
 
@@ -292,6 +296,7 @@ export default function Index() {
         id: string;
         title: string;
     }>>([]);
+    const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
 
     // Fetch connections
     useEffect(() => {
@@ -430,103 +435,72 @@ export default function Index() {
         // This would be implemented in a future update
     }, [loadChatConnection]);
 
-    // Now define createNewChat which uses selectChat
-    const createNewChat = useCallback(async () => {
+    // Update the createNewChat function to open the dialog
+    const createNewChat = useCallback(() => {
+        setNewChatDialogOpen(true);
+    }, []);
+
+    // Add a new function to handle chat creation from the dialog
+    const handleCreateChat = useCallback(async (title: string, connectionId: string) => {
         if (!user) {
             toast.error("You must be logged in to create a chat.");
             return;
         }
         
-        if (!selectedConnectionId) {
-            toast.error("Please select a database connection first.");
-            return;
-        }
-        
         try {
-            // Get the connection name for the title
-            const connection = connections.find(conn => conn.connection === selectedConnectionId);
-            const connectionName = connection ? connection.name : 'Database';
-            
-            console.log("Creating new chat with connection:", {
-                userId: user.id,
-                connectionId: selectedConnectionId,
-                connectionName
-            });
-            
+            // Create a new chat in the database
             const { data, error } = await supabaseClient
                 .from('chats')
-                .insert([
-                    { 
-                        user_id: user.id,
-                        title: `Chat with ${connectionName}` 
-                    }
-                ])
-                .select()
+                .insert({
+                    title: title,
+                    user_id: user.id,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
+                .select('id')
                 .single();
-                
+            
             if (error) {
-                console.error("Error creating new chat:", error);
-                toast.error("Failed to create new chat.");
-                throw new Error(`Failed to create chat: ${error.message}`);
+                console.error("Error creating chat:", error);
+                toast.error("Failed to create chat.");
+                return;
             }
             
-            if (!data) {
-                console.error("No data returned from chat creation");
-                toast.error("Failed to create new chat.");
-                throw new Error("No data returned from chat creation");
-            }
+            const newChatId = data.id;
             
-            console.log("Chat created successfully:", data);
-            
-            // Create the chat_connection record
-            console.log("Creating chat connection record:", {
-                chatId: data.id,
-                connectionId: selectedConnectionId,
-                userId: user.id
-            });
-            
+            // Create the chat-connection relationship
             const { error: connectionError } = await supabaseClient
                 .from('chat_connections')
-                .insert([
-                    {
-                        chat_id: data.id,
-                        connection_id: selectedConnectionId,
-                        user_id: user.id
-                    }
-                ]);
-                
+                .insert({
+                    chat_id: newChatId,
+                    connection_id: connectionId,
+                    user_id: user.id,
+                    updated_at: new Date().toISOString()
+                });
+            
             if (connectionError) {
                 console.error("Error creating chat connection:", connectionError);
-                toast.error("Failed to associate connection with chat.");
-                
-                // Try to delete the chat since we couldn't associate it with a connection
-                try {
-                    await supabaseClient
-                        .from('chats')
-                        .delete()
-                        .eq('id', data.id);
-                    console.log("Deleted chat due to connection association failure");
-                } catch (deleteError) {
-                    console.error("Failed to delete chat after connection error:", deleteError);
-                }
-                
-                throw new Error(`Failed to create chat connection: ${connectionError.message}`);
+                toast.error("Failed to link chat to database connection.");
+                return;
             }
             
-            console.log("Chat connection created successfully");
+            // Add the new chat to the local state
+            setChats(prevChats => [
+                ...prevChats,
+                { id: newChatId, title: title }
+            ]);
             
-            // Add the new chat to the list and select it
-            setChats(prevChats => [data, ...prevChats]);
-            await selectChat(data.id);
-            toast.success(`Created new chat with ${connectionName}`);
+            // Select the new chat
+            setCurrentChatId(newChatId);
+            setSelectedConnectionId(connectionId);
+            setMessages([]);
             
-            return data.id;
+            toast.success("New chat created successfully!");
         } catch (error) {
-            console.error("Error creating new chat:", error);
-            toast.error("An error occurred while creating the chat.");
-            throw error;
+            console.error("Error in chat creation:", error);
+            toast.error("An unexpected error occurred.");
         }
-    }, [user, selectedConnectionId, supabaseClient, selectChat, setChats, connections, toast]);
+    }, [user, supabaseClient, toast]);
 
     // Fix the setMessages call in handleSend to match the Message type
     const handleSend = useCallback(async () => {
@@ -565,8 +539,8 @@ export default function Index() {
         ]);
         
         try {
-            // Send message to API
-            await sendMessage(currentMessage, selectedConnectionId, currentChatId);
+            // Send message to API with the 5 most recent messages as context
+            await sendMessage(currentMessage, selectedConnectionId, currentChatId, messages.slice(-5));
         } catch (error) {
             console.error("Error sending message:", error);
             toast.error("Failed to send message. Please try again.");
@@ -581,7 +555,7 @@ export default function Index() {
                 },
             ]);
         }
-    }, [message, currentChatId, selectedConnectionId, createNewChat, sendMessage, setMessage, setMessages, user, toast]);
+    }, [message, currentChatId, selectedConnectionId, createNewChat, sendMessage, setMessage, setMessages, user, toast, messages]);
 
     // Update the useEffect that handles streamingText
     useEffect(() => {
@@ -701,25 +675,34 @@ export default function Index() {
         return connection ? connection.name : null;
     }, [connections, selectedConnectionId]);
 
+    // Add a function to get the current chat title
+    const getCurrentChatTitle = useCallback(() => {
+        if (!currentChatId) return null;
+        const chat = chats.find(c => c.id === currentChatId);
+        return chat ? chat.title : null;
+    }, [chats, currentChatId]);
+
     return (
         <div className="min-h-screen w-full bg-background text-foreground flex">
-            {/* Desktop Sidebar - Display Connections */}
+            {/* Desktop Sidebar - Simplified to only show chats */}
             <aside className="hidden lg:block w-64 border-r border-border bg-muted/20 p-4 fixed h-screen">
                 <nav className="space-y-4">
                     <div className="flex justify-between items-center">
                         <h2 className="text-lg font-semibold tracking-tight">Chats</h2>
                         <Button
-                            variant="outline"
+                            variant="default"
                             size="sm"
                             onClick={createNewChat}
+                            className="bg-primary text-primary-foreground hover:bg-primary/90"
                         >
+                            <PlusCircle className="h-4 w-4 mr-1" />
                             New Chat
                         </Button>
                     </div>
 
-                    <div className="space-y-1 max-h-[30vh] overflow-y-auto">
+                    <div className="space-y-1 max-h-[70vh] overflow-y-auto">
                         {chats.map((chat) => (
-                            <div key={chat.id} className="flex flex-col">
+                            <div key={chat.id} className="flex flex-col mb-2">
                                 <Button
                                     variant={currentChatId === chat.id ? 'secondary' : 'ghost'}
                                     className="w-full justify-start text-left"
@@ -728,8 +711,11 @@ export default function Index() {
                                     <span className="truncate">{chat.title}</span>
                                 </Button>
                                 {currentChatId === chat.id && (
-                                    <div className="text-xs text-muted-foreground ml-2 mb-1">
-                                        Connected to: {getConnectionNameForChat(chat.id)}
+                                    <div className="flex items-center gap-1 ml-2 mt-1">
+                                        <Database className="h-3 w-3 text-muted-foreground" />
+                                        <Badge variant="secondary" className="text-xs font-normal">
+                                            {getConnectionNameForChat(chat.id)}
+                                        </Badge>
                                     </div>
                                 )}
                             </div>
@@ -739,30 +725,6 @@ export default function Index() {
                                 No chats yet. Create a new chat to get started.
                             </p>
                         )}
-                    </div>
-
-                    <div className="pt-4 border-t">
-                        <h2 className="text-lg font-semibold tracking-tight mb-2">Data Connections</h2>
-                        <div className="space-y-1">
-                            {connections.map((db) => (
-                                <div key={db.connection} className="flex gap-1 items-center">
-                                    <Button
-                                        variant={selectedConnectionId === db.connection ? 'secondary' : 'ghost'}
-                                        className="w-full justify-start flex-1"
-                                        onClick={() => handleConnectionChange(db.connection)}
-                                    >
-                                        <span className="truncate">{db.name}</span>
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 hover:text-destructive"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
                     </div>
 
                     <div className="pt-4 border-t">
@@ -779,15 +741,14 @@ export default function Index() {
                 </nav>
             </aside>
 
-            {/* Main Content */}
+            {/* Mobile Header - Simplified */}
             <div className="flex-1 flex flex-col ml-0 lg:ml-64">
-                {/* Mobile Header */}
                 <header className="lg:hidden flex items-center justify-between p-4 border-b fixed w-full bg-background z-10">
                     <div className="flex items-center gap-2">
                         <Sheet>
                             <SheetTrigger asChild>
                                 <Button variant="ghost" size="icon">
-                                    <Database className="h-5 w-5" />
+                                    <Menu className="h-5 w-5" />
                                 </Button>
                             </SheetTrigger>
                             <SheetContent side="left" className="w-[300px] sm:w-[400px]">
@@ -795,27 +756,37 @@ export default function Index() {
                                     <div className="flex justify-between items-center">
                                         <h2 className="text-lg font-semibold tracking-tight">Chats</h2>
                                         <Button
-                                            variant="outline"
+                                            variant="default"
                                             size="sm"
-                                            onClick={createNewChat}
+                                            onClick={() => {
+                                                setNewChatDialogOpen(true);
+                                            }}
+                                            className="bg-primary text-primary-foreground hover:bg-primary/90"
                                         >
+                                            <PlusCircle className="h-4 w-4 mr-1" />
                                             New Chat
                                         </Button>
                                     </div>
 
-                                    <div className="space-y-1 max-h-[30vh] overflow-y-auto">
+                                    <div className="space-y-1">
                                         {chats.map((chat) => (
-                                            <div key={chat.id} className="flex flex-col">
+                                            <div key={chat.id} className="flex flex-col mb-2">
                                                 <Button
                                                     variant={currentChatId === chat.id ? 'secondary' : 'ghost'}
                                                     className="w-full justify-start text-left"
-                                                    onClick={() => selectChat(chat.id)}
+                                                    onClick={() => {
+                                                        selectChat(chat.id);
+                                                        (document.querySelector('[data-radix-collection-item]') as HTMLElement)?.click();
+                                                    }}
                                                 >
                                                     <span className="truncate">{chat.title}</span>
                                                 </Button>
                                                 {currentChatId === chat.id && (
-                                                    <div className="text-xs text-muted-foreground ml-2 mb-1">
-                                                        Connected to: {getConnectionNameForChat(chat.id)}
+                                                    <div className="flex items-center gap-1 ml-2 mt-1">
+                                                        <Database className="h-3 w-3 text-muted-foreground" />
+                                                        <Badge variant="secondary" className="text-xs font-normal">
+                                                            {getConnectionNameForChat(chat.id)}
+                                                        </Badge>
                                                     </div>
                                                 )}
                                             </div>
@@ -825,30 +796,6 @@ export default function Index() {
                                                 No chats yet. Create a new chat to get started.
                                             </p>
                                         )}
-                                    </div>
-
-                                    <div className="pt-4 border-t">
-                                        <h2 className="text-lg font-semibold tracking-tight mb-2">Data Connections</h2>
-                                        <div className="space-y-1">
-                                            {connections.map((db) => (
-                                                <div key={db.connection} className="flex gap-1 items-center">
-                                                    <Button
-                                                        variant={selectedConnectionId === db.connection ? 'secondary' : 'ghost'}
-                                                        className="w-full justify-start flex-1"
-                                                        onClick={() => handleConnectionChange(db.connection)}
-                                                    >
-                                                        <span className="truncate">{db.name}</span>
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 hover:text-destructive"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            ))}
-                                        </div>
                                     </div>
 
                                     <div className="pt-4 border-t">
@@ -865,9 +812,9 @@ export default function Index() {
                                 </nav>
                             </SheetContent>
                         </Sheet>
-                        {selectedConnectionId && (
+                        {currentChatId && (
                             <div className="text-sm font-medium">
-                                {getCurrentConnectionName()}
+                                {getCurrentChatTitle()}
                             </div>
                         )}
                     </div>
@@ -887,49 +834,42 @@ export default function Index() {
 
                 {/* Chat Messages */}
                 <div className="flex-1 overflow-y-auto p-8 space-y-4 chat-container pt-16 mt-12 lg:pt-0 pb-32">
-                    {!selectedConnectionId && (
+                    {!currentChatId ? (
                         <div className="flex flex-col items-center justify-center h-full">
-                            <Database className="h-12 w-12 text-muted-foreground mb-4" />
-                            <h3 className="text-lg font-medium">Select a database connection</h3>
+                            <MessageSquareText className="h-12 w-12 text-primary mb-4" />
+                            <h3 className="text-lg font-medium">Start a new chat</h3>
                             <p className="text-sm text-muted-foreground text-center max-w-md mt-2">
-                                Choose a database connection from the sidebar to start chatting with your data.
+                                Create a new chat to start interacting with your database.
                             </p>
-                            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-md">
-                                {connections.slice(0, 4).map((db) => (
-                                    <Button
-                                        key={db.connection}
-                                        variant="outline"
-                                        className="w-full"
-                                        onClick={() => handleConnectionChange(db.connection)}
-                                    >
-                                        {db.name}
-                                    </Button>
-                                ))}
-                            </div>
-                            {connections.length > 4 && (
-                                <p className="text-xs text-muted-foreground mt-2">
-                                    More connections available in the sidebar.
-                                </p>
-                            )}
-                        </div>
-                    )}
-                    <AnimatePresence>
-                        {messages.map((msg, index) => (
-                            <motion.div
-                                key={index}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.3 }}
-                                className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
+                            <Button 
+                                onClick={createNewChat} 
+                                className="mt-6 bg-primary text-primary-foreground hover:bg-primary/90"
                             >
-                                <div className={`p-3 rounded-lg max-w-[75%] ${msg.isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                                    {renderMessageContent(msg)}
-                                </div>
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
-                    {isLoading && <LoadingDots />}
-                    <div ref={messagesEndRef} />
+                                <PlusCircle className="h-4 w-4 mr-2" />
+                                New Chat
+                            </Button>
+                        </div>
+                    ) : (
+                        <>
+                            <AnimatePresence>
+                                {messages.map((msg, index) => (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.3 }}
+                                        className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
+                                    >
+                                        <div className={`p-3 rounded-lg max-w-[75%] ${msg.isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                                            {renderMessageContent(msg)}
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+                            {isLoading && <LoadingDots />}
+                            <div ref={messagesEndRef} />
+                        </>
+                    )}
                 </div>
 
                 {/* Input Area */}
@@ -954,6 +894,14 @@ export default function Index() {
                     </div>
                 </div>
             </div>
+
+            {/* New Chat Dialog */}
+            <NewChatDialog
+                open={newChatDialogOpen}
+                onOpenChange={setNewChatDialogOpen}
+                connections={connections}
+                onCreateChat={handleCreateChat}
+            />
         </div>
     );
 }

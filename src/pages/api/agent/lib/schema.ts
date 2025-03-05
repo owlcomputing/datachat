@@ -18,19 +18,32 @@ export async function getSchemaForConnection(connectionId: string): Promise<any[
     );
 
     // Fetch schema from database_schemas table
-    const { data: schemaData, error } = await supabaseClient
+    const { data, error } = await supabaseClient
       .from('database_schemas')
       .select('schema, schema_data')
       .eq('connection_id', connectionId)
-      .single();
+      .maybeSingle(); // Use maybeSingle instead of single to avoid errors when no rows are found
 
-    if (error || !schemaData) {
-      console.error("Error fetching schema:", error?.message || 'Schema not found');
+    if (error) {
+      console.error("Error fetching schema:", error.message);
+      return defaultSchema;
+    }
+
+    if (!data) {
+      console.log("No schema found for connection ID:", connectionId);
       return defaultSchema;
     }
 
     // Use schema_data if available, otherwise use schema
-    return schemaData.schema_data || schemaData.schema || defaultSchema;
+    const schemaData = data.schema_data || data.schema || defaultSchema;
+    
+    // Ensure we have an array
+    if (!Array.isArray(schemaData)) {
+      console.warn("Schema data is not an array, returning default schema");
+      return defaultSchema;
+    }
+    
+    return schemaData;
   } catch (error) {
     console.error("Error getting schema for connection:", error);
     return defaultSchema;

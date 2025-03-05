@@ -197,13 +197,6 @@ export default function ProfilePage() {
             ) : (
               <p>Loading...</p>
             )}
-            <div className="grid grid-cols-2 gap-4">
-              <Input placeholder="First Name" />
-              <Input placeholder="Last Name" />
-              <Input placeholder="Email" type="email" className="col-span-2" />
-              <Input placeholder="Password" type="password" className="col-span-2" />
-            </div>
-            <Button className="mt-4">Update Profile</Button>
           </CardContent>
         </Card>
 
