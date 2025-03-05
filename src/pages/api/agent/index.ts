@@ -191,6 +191,29 @@ export async function handleQuestion(userInput: string, userId?: string, chatId?
     cleanedOutput = firstParagraph;
   }
   
+  // Extract SQL query from the tool response if available
+  let sqlQuery = null;
+  if (result.intermediateSteps && result.intermediateSteps.length > 0) {
+    console.log("Checking intermediate steps for SQL query...");
+    for (const step of result.intermediateSteps) {
+      console.log("Step action tool:", step.action?.tool);
+      if (step.action && (step.action.tool === 'postgres_natural_language_query' || step.action.tool === 'mysql_natural_language_query')) {
+        try {
+          console.log("Found SQL tool, parsing observation:", step.observation);
+          const toolResponse = JSON.parse(step.observation);
+          console.log("Parsed tool response:", toolResponse);
+          if (toolResponse && toolResponse.sqlQuery) {
+            sqlQuery = toolResponse.sqlQuery;
+            console.log("Extracted SQL query:", sqlQuery);
+            break;
+          }
+        } catch (e) {
+          console.error("Error parsing tool response:", e);
+        }
+      }
+    }
+  }
+  
   // Get graph type suggestion from LLM
   const visualization = await suggestGraphType(result.output, userInput, agentExecutor);
   
@@ -200,7 +223,8 @@ export async function handleQuestion(userInput: string, userId?: string, chatId?
   const finalResponse = {
     answer: cleanedOutput,
     visualization: visualization,
-    tableData: tableData
+    tableData: tableData,
+    sqlQuery: sqlQuery
   };
   
   return finalResponse;

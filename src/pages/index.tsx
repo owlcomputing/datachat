@@ -20,6 +20,7 @@ import TableComponent, { Column } from '@/components/Table'
 import { toast } from 'react-hot-toast'
 import { NewChatDialog } from "@/components/NewChatDialog"
 import { Badge } from "@/components/ui/badge"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 interface VisualizationData {
   type: string;
@@ -63,6 +64,7 @@ interface Message {
     role?: string;
     visualization?: VisualizationData;
     tableData?: VisualizationData;
+    sqlQuery?: string;
 }
 
 // Component to render the appropriate chart based on visualization type
@@ -564,6 +566,7 @@ export default function Index() {
                 // Try to parse as JSON first
                 const response = JSON.parse(streamingText);
                 console.log("Received JSON response:", response);
+                console.log("SQL Query in response:", response.sqlQuery);
                 
                 setMessages((prev) => [
                     ...prev,
@@ -572,7 +575,8 @@ export default function Index() {
                         isUser: false,
                         role: "assistant",
                         visualization: response.visualization,
-                        tableData: response.tableData
+                        tableData: response.tableData,
+                        sqlQuery: response.sqlQuery
                     }
                 ]);
             } catch (e) {
@@ -593,6 +597,9 @@ export default function Index() {
 
     // Function to render message content
     const renderMessageContent = (msg: Message) => {
+        console.log("Rendering message:", msg);
+        console.log("SQL Query in message:", msg.sqlQuery);
+        
         return (
             <div className="space-y-4">
                 <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -613,6 +620,23 @@ export default function Index() {
                 {msg.tableData && (
                     <div className="mt-4 w-full">
                         <VisualizationComponent visualization={msg.tableData} />
+                    </div>
+                )}
+
+                {msg.sqlQuery && (
+                    <div className="mt-4 w-full">
+                        <Accordion type="single" collapsible className="w-full">
+                            <AccordionItem value="sql-query">
+                                <AccordionTrigger className="text-sm font-medium">
+                                    View SQL Query
+                                </AccordionTrigger>
+                                <AccordionContent>
+                                    <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-md overflow-x-auto">
+                                        <pre className="text-xs">{msg.sqlQuery}</pre>
+                                    </div>
+                                </AccordionContent>
+                            </AccordionItem>
+                        </Accordion>
                     </div>
                 )}
             </div>

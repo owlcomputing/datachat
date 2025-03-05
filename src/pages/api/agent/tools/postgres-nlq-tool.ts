@@ -71,8 +71,13 @@ export class PostgresNLQTool extends Tool {
         return "No results found for your query. Please try rephrasing your question or check if the data you're looking for exists in the database.";
       }
 
-      // Convert results to a readable string
-      return JSON.stringify(results, null, 2);
+      // Convert results to a readable string and include the SQL query
+      const response = {
+        results,
+        sqlQuery
+      };
+      console.log("Returning response with SQL query:", response);
+      return JSON.stringify(response, null, 2);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
