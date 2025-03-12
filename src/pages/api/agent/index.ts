@@ -60,6 +60,35 @@ async function getDatabaseDialect(connectionId: string): Promise<string> {
   }
 }
 
+// Function to get custom instructions for a connection
+async function getConnectionInstructions(connectionId: string): Promise<string | null> {
+  if (!connectionId) return null;
+  
+  try {
+    const { data, error } = await supabaseClient
+      .from('database_connections')
+      .select('instructions')
+      .eq('id', connectionId)
+      .single();
+
+    if (error) {
+      console.error("Error fetching connection instructions:", error.message);
+      return null;
+    }
+
+    if (!data || !data.instructions) {
+      console.log("No custom instructions found for connection:", connectionId);
+      return null;
+    }
+
+    console.log("Found custom instructions for connection:", connectionId);
+    return data.instructions;
+  } catch (error) {
+    console.error("Error getting connection instructions:", error);
+    return null;
+  }
+}
+
 export async function initializeAgent(userId?: string, chatId?: string, connectionId?: string) {
   // Create a new agent executor for each request to ensure we use the correct connection
   const gemini = new ChatGoogleGenerativeAI({
@@ -99,29 +128,43 @@ export async function initializeAgent(userId?: string, chatId?: string, connecti
 
   const tools: Tool[] = [databaseTool];
 
+  // Get custom instructions if a connectionId is provided
+  let customInstructions = null;
+  if (connectionId) {
+    customInstructions = await getConnectionInstructions(connectionId);
+  }
+
+  // Base system prompt
+  let systemPrompt = "You are a specialized database interaction and data visualization chatbot. Your primary purpose is to answer questions based on the data in the database and provide visualizations when appropriate. Assume all questions relate to the database. If you determine a question does not relate to the database, respond with 'I'm sorry, I don't know how to answer that.' You will: \n\n" +
+    "- Query the database to retrieve relevant information.\n" +
+    "- Perform calculations (e.g., averages, sums, counts) on the data as needed to answer the user's question.\n" +
+    "- Present the results in an EXTREMELY concise manner - your text response should be no more than 1-3 simple sentences.\n" +
+    "- Focus on providing the data in visual formats (charts and tables) rather than lengthy text explanations.\n" +
+    "- When the data is suitable for visualization, structure your query to return data that can be effectively visualized.\n" +
+    "- For time-series data, ensure you include date/time fields and relevant metrics.\n" +
+    "- For categorical data, ensure you include category fields and corresponding values.\n" +
+    "- When the data is tabular in nature, present it in a structured format that can be displayed in a table.\n" +
+    "- Include both raw data (for tables) and processed data (for charts) when appropriate.\n" +
+    "- For visualizations, always use the color format 'hsl(var(--chart-N))' where N is 1-5, not 'var(--color-X)'.\n" +
+    "- If requested information isn't available, notify the user.\n\n" +
+    "When accessing the database:\n" +
+    "1. Use precise queries.\n" +
+    "2. If needed, refine search parameters.\n" +
+    "3. Always include fields that would be useful for visualization (dates, categories, metrics).\n" +
+    "4. Structure your response to include a VERY BRIEF summary (1-3 sentences maximum), followed by data that can be presented in tables and/or charts.\n\n" +
+    "Maintain a professional tone.\n" +
+    "Always format your response as clean markdown with proper indentation and line breaks, but keep the text portion extremely brief.";
+
+  // Add custom instructions if available
+  if (customInstructions) {
+    systemPrompt += "\n\n--- CUSTOM INSTRUCTIONS ---\n" + customInstructions;
+    console.log("Added custom instructions to prompt");
+  }
+
   const prompt = ChatPromptTemplate.fromMessages([
     {
       type: "system",
-      content:
-        "You are a specialized database interaction and data visualization chatbot. Your primary purpose is to answer questions based on the data in the database and provide visualizations when appropriate. Assume all questions relate to the database. If you determine a question does not relate to the database, respond with 'I'm sorry, I don't know how to answer that.' You will: \n\n" +
-        "- Query the database to retrieve relevant information.\n" +
-        "- Perform calculations (e.g., averages, sums, counts) on the data as needed to answer the user's question.\n" +
-        "- Present the results in an EXTREMELY concise manner - your text response should be no more than 1-3 simple sentences.\n" +
-        "- Focus on providing the data in visual formats (charts and tables) rather than lengthy text explanations.\n" +
-        "- When the data is suitable for visualization, structure your query to return data that can be effectively visualized.\n" +
-        "- For time-series data, ensure you include date/time fields and relevant metrics.\n" +
-        "- For categorical data, ensure you include category fields and corresponding values.\n" +
-        "- When the data is tabular in nature, present it in a structured format that can be displayed in a table.\n" +
-        "- Include both raw data (for tables) and processed data (for charts) when appropriate.\n" +
-        "- For visualizations, always use the color format 'hsl(var(--chart-N))' where N is 1-5, not 'var(--color-X)'.\n" +
-        "- If requested information isn't available, notify the user.\n\n" +
-        "When accessing the database:\n" +
-        "1. Use precise queries.\n" +
-        "2. If needed, refine search parameters.\n" +
-        "3. Always include fields that would be useful for visualization (dates, categories, metrics).\n" +
-        "4. Structure your response to include a VERY BRIEF summary (1-3 sentences maximum), followed by data that can be presented in tables and/or charts.\n\n" +
-        "Maintain a professional tone.\n" +
-        "Always format your response as clean markdown with proper indentation and line breaks, but keep the text portion extremely brief.",
+      content: systemPrompt,
     },
     ["placeholder", "{chat_history}"],
     ["human", "{input}"],

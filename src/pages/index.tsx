@@ -271,7 +271,7 @@ function useStreamingResponse(connections: Array<{ name: string; connection: str
 // Update the loading indicator
 const LoadingDots = () => (
   <div className="flex justify-start">
-    <div className="p-3 rounded-lg max-w-[75%] bg-gray-200 text-black flex space-x-1">
+    <div className="flex space-x-2">
       <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
       <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
       <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:-0.5s]"></div>
@@ -734,14 +734,6 @@ export default function Index() {
                                 >
                                     <span className="truncate">{chat.title}</span>
                                 </Button>
-                                {currentChatId === chat.id && (
-                                    <div className="flex items-center gap-1 ml-2 mt-1">
-                                        <Database className="h-3 w-3 text-muted-foreground" />
-                                        <Badge variant="secondary" className="text-xs font-normal">
-                                            {getConnectionNameForChat(chat.id)}
-                                        </Badge>
-                                    </div>
-                                )}
                             </div>
                         ))}
                         {chats.length === 0 && (
@@ -767,6 +759,7 @@ export default function Index() {
 
             {/* Mobile Header - Simplified */}
             <div className="flex-1 flex flex-col ml-0 lg:ml-64">
+                {/* Mobile Header */}
                 <header className="lg:hidden flex items-center justify-between p-4 border-b fixed w-full bg-background z-10">
                     <div className="flex items-center gap-2">
                         <Sheet>
@@ -805,14 +798,6 @@ export default function Index() {
                                                 >
                                                     <span className="truncate">{chat.title}</span>
                                                 </Button>
-                                                {currentChatId === chat.id && (
-                                                    <div className="flex items-center gap-1 ml-2 mt-1">
-                                                        <Database className="h-3 w-3 text-muted-foreground" />
-                                                        <Badge variant="secondary" className="text-xs font-normal">
-                                                            {getConnectionNameForChat(chat.id)}
-                                                        </Badge>
-                                                    </div>
-                                                )}
                                             </div>
                                         ))}
                                         {chats.length === 0 && (
@@ -856,10 +841,43 @@ export default function Index() {
                     </div>
                 </header>
 
+                {/* Desktop Header/Banner with DB name */}
+                {currentChatId && (
+                    <div className="hidden lg:flex items-center justify-between p-3 border-b bg-muted/10">
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-lg font-medium">{getCurrentChatTitle()}</h2>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 px-3 py-1 bg-muted rounded-full text-sm">
+                                <Database className="h-4 w-4 text-muted-foreground" />
+                                <span>{getCurrentConnectionName()}</span>
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={createNewChat}
+                            >
+                                <PlusCircle className="h-4 w-4 mr-1" />
+                                New Chat
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Mobile Banner with DB name (only visible when chat is selected) */}
+                {currentChatId && (
+                    <div className="lg:hidden flex items-center justify-between p-2 border-b bg-muted/10 mt-16">
+                        <div className="flex items-center gap-1 px-2 py-1 bg-muted rounded-full text-xs">
+                            <Database className="h-3 w-3 text-muted-foreground" />
+                            <span>{getCurrentConnectionName()}</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* Chat Messages */}
-                <div className="flex-1 overflow-y-auto p-8 space-y-4 chat-container pt-16 mt-12 lg:pt-0 pb-32">
+                <div className={`flex-1 overflow-y-auto space-y-6 chat-container ${currentChatId ? 'lg:pt-4' : 'lg:pt-0'} pb-32 ${currentChatId ? 'mt-6 lg:mt-0' : 'mt-12'}`}>
                     {!currentChatId ? (
-                        <div className="flex flex-col items-center justify-center h-full">
+                        <div className="flex flex-col items-center justify-center h-full p-8">
                             <MessageSquareText className="h-12 w-12 text-primary mb-4" />
                             <h3 className="text-lg font-medium">Start a new chat</h3>
                             <p className="text-sm text-muted-foreground text-center max-w-md mt-2">
@@ -879,18 +897,38 @@ export default function Index() {
                                 {messages.map((msg, index) => (
                                     <motion.div
                                         key={index}
-                                        initial={{ opacity: 0, y: 20 }}
+                                        initial={{ opacity: 0, y: 10 }}
                                         animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.3 }}
-                                        className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
+                                        transition={{ duration: 0.2 }}
+                                        className="w-full"
                                     >
-                                        <div className={`p-3 rounded-lg max-w-[75%] ${msg.isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                                            {renderMessageContent(msg)}
+                                        <div className={`w-full py-6 px-6 ${msg.isUser ? 'bg-background' : 'bg-muted/30'}`}>
+                                            <div className="max-w-3xl mx-auto flex items-start gap-4">
+                                                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${msg.isUser ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20'}`}>
+                                                    {msg.isUser ? (
+                                                        <User className="h-5 w-5" />
+                                                    ) : (
+                                                        <Database className="h-5 w-5" />
+                                                    )}
+                                                </div>
+                                                <div className="flex-1">
+                                                    {renderMessageContent(msg)}
+                                                </div>
+                                            </div>
                                         </div>
                                     </motion.div>
                                 ))}
                             </AnimatePresence>
-                            {isLoading && <LoadingDots />}
+                            {isLoading && (
+                                <div className="w-full py-6 px-6 bg-muted/30">
+                                    <div className="max-w-3xl mx-auto flex items-start gap-4">
+                                        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-muted-foreground/20">
+                                            <Database className="h-5 w-5" />
+                                        </div>
+                                        <LoadingDots />
+                                    </div>
+                                </div>
+                            )}
                             <div ref={messagesEndRef} />
                         </>
                     )}
@@ -898,7 +936,7 @@ export default function Index() {
 
                 {/* Input Area */}
                 <div className="p-4 border-t fixed bottom-0 w-full lg:w-[calc(100%-16rem)] bg-background">
-                    <div className="flex gap-2">
+                    <div className="max-w-3xl mx-auto flex gap-2">
                         <Input
                             placeholder="Ask a question about your data..."
                             value={message}
@@ -909,11 +947,14 @@ export default function Index() {
                                     handleSend();
                                 }
                             }}
-                            className="flex-1"
+                            className="flex-1 py-6 px-4 rounded-full"
                         />
-                        <Button onClick={handleSend} disabled={isLoading || !message.trim()}>
-                            <MessageSquareText className="h-4 w-4 mr-2" />
-                            Send
+                        <Button 
+                            onClick={handleSend} 
+                            disabled={isLoading || !message.trim()}
+                            className="rounded-full aspect-square p-2"
+                        >
+                            <MessageSquareText className="h-5 w-5" />
                         </Button>
                     </div>
                 </div>
