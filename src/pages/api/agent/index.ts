@@ -7,6 +7,7 @@ import { Tool } from "@langchain/core/tools";
 import { NextApiRequest, NextApiResponse } from "next";
 import { PostgresNLQTool } from "./tools/postgres-nlq-tool";
 import { MySQLNLQTool } from "./tools/mysql-nlq-tool";
+import { SQLServerNLQTool } from "./tools/sqlserver-nlq-tool";
 import {
   checkSupabaseConnection,
   getConnectionIdForChat,
@@ -50,6 +51,13 @@ export async function initializeAgent(
       if (dialect === "mysql") {
         console.log("Using MySQL NLQ tool");
         databaseTool = new MySQLNLQTool(
+          userId || null,
+          chatId || null,
+          connectionId,
+        );
+      } else if (dialect === "sqlserver") {
+        console.log("Using SQL Server NLQ tool");
+        databaseTool = new SQLServerNLQTool(
           userId || null,
           chatId || null,
           connectionId,
