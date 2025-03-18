@@ -89,6 +89,12 @@ Important guidelines:
 10. For string comparisons, use LIKE with appropriate wildcards.
 11. For NULL handling, use IS NULL or IS NOT NULL.
 12. For CASE expressions, follow SQL Server syntax.
+13. ALWAYS include descriptive and human-readable fields alongside ID fields in your SELECT statements. For example:
+    - When selecting a customer ID, also include the customer name
+    - When selecting a product ID, also include the product name or description
+    - When selecting an order ID, include relevant details like date, status, or associated entity names
+    - For any ID field, identify and include at least one descriptive field that helps users understand what the ID represents
+    - Never return only ID fields in your results without accompanying descriptive fields
 
 Return your response in this format:
 SQL Query: <your SQL query>

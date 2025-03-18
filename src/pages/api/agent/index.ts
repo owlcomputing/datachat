@@ -20,7 +20,7 @@ import { suggestGraphType, suggestTableData } from "./utils/visualization";
 // Define the output structure type
 interface AgentResponse {
   answer: string;
-  visualization: string; // JSON string for chart configuration
+  visualization: Record<string, unknown> | null; // Changed from string to object
   tableData?: Record<string, unknown> | null; // Can be refined further based on actual structure
   sqlQuery?: string;
 }
@@ -236,7 +236,7 @@ export async function handleQuestion(
   // Parse the result
   const finalResponse: AgentResponse = {
     answer: cleanedOutput,
-    visualization: JSON.stringify(visualization),
+    visualization: visualization,
     tableData: tableData,
     sqlQuery: sqlQuery,
   };

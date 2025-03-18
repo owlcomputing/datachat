@@ -59,6 +59,8 @@ When generating SQL queries, consider how the data will be visualized:
    - Format as numeric values
    - Example: SELECT AVG(field_goal_percentage) AS value FROM ...
 
+   NEVER SELECT EXCLUSIVELY ID FIELDS, ALWAYS SELECT AN ASSOCIATED FIELD THAT IS MORE READABLE AND MEANINGFUL.
+
 Always return fields that would be relevant for the axes of charts.
 Use clear, consistent naming for fields that will be used in visualizations.`;
 
